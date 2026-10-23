@@ -1,0 +1,518 @@
+#include <WiFi.h>
+#include <WebServer.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
+#include <Preferences.h>
+#include <time.h>
+
+// ===== ตั้งค่า WiFi =====
+const char* ssid = "AccBiz_Floor3";
+const char* password = "";
+
+WebServer server(80);
+
+// ===== ที่เก็บข้อมูลถาวรใน Flash (NVS) กันตัวนับรีเซ็ตตอนบอร์ดรีสตาร์ท =====
+Preferences preferences;
+
+// ===== ตั้งค่า Telegram Bot =====
+const char* botToken = "8065731396:AAHDVeaCNC_noOGLdRuJ84V34Xv9JHipCRU";
+const char* chatId   = "8744976712";
+
+// ===== เพิ่มเฉพาะระบบเก็บประวัติ Telegram (ไม่เปลี่ยนระบบ Telegram เดิม) =====
+const char* telegramLogUrl = "https://117.18.125.19/iWasteBank/telegram_log.php";
+const char* telegramLogApiKey = "IWASTEBANK_TELEGRAM_2026";
+
+// CA ที่ใช้ตรวจสอบ TLS ของ Let's Encrypt (ISRG Root X1)
+// หากเซิร์ฟเวอร์เปลี่ยนสายโซ่ใบรับรอง ต้องตรวจสอบ CA ใหม่
+static const char ISRG_ROOT_X1[] PROGMEM = R"EOF(
+-----BEGIN CERTIFICATE-----
+MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
+TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh
+cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMTUwNjA0MTEwNDM4
+WhcNMzUwNjA0MTEwNDM4WjBPMQswCQYDVQQGEwJVUzEpMCcGA1UEChMgSW50ZXJu
+ZXQgU2VjdXJpdHkgUmVzZWFyY2ggR3JvdXAxFTATBgNVBAMTDElTUkcgUm9vdCBY
+MTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAK3oJHP0FDfzm54rVygc
+h77ct984kIxuPOZXoHj3dcKi/vVqbvYATyjb3miGbESTtrFj/RQSa78f0uoxmyF+
+0TM8ukj13Xnfs7j/EvEhmkvBioZxaUpmZmyPfjxwv60pIgbz5MDmgK7iS4+3mX6U
+A5/TR5d8mUgjU+g4rk8Kb4Mu0UlXjIB0ttov0DiNewNwIRt18jA8+o+u3dpjq+sW
+T8KOEUt+zwvo/7V3LvSye0rgTBIlDHCNAymg4VMk7BPZ7hm/ELNKjD+Jo2FR3qyH
+B5T0Y3HsLuJvW5iB4YlcNHlsdu87kGJ55tukmi8mxdAQ4Q7e2RCOFvu396j3x+UC
+B5iPNgiV5+I3lg02dZ77DnKxHZu8A/lJBdiB3QW0KtZB6awBdpUKD9jf1b0SHzUv
+KBds0pjBqAlkd25HN7rOrFleaJ1/ctaJxQZBKT5ZPt0m9STJEadao0xAH0ahmbWn
+OlFuhjuefXKnEgV4We0+UXgVCwOPjdAvBbI+e0ocS3MFEvzG6uBQE3xDk3SzynTn
+jh8BCNAw1FtxNrQHusEwMFxIt4I7mKZ9YIqioymCzLq9gwQbooMDQaHWBfEbwrbw
+qHyGO0aoSCqI3Haadr8faqU9GY/rOPNk3sgrDQoo//fb4hVC1CLQJ13hef4Y53CI
+rU7m2Ys6xt0nUW7/vGT1M0NPAgMBAAGjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNV
+HRMBAf8EBTADAQH/MB0GA1UdDgQWBBR5tFnme7bl5AFzgAiIyBpY9umbbjANBgkq
+hkiG9w0BAQsFAAOCAgEAVR9YqbyyqFDQDLHYGmkgJykIrGF1XIpu+ILlaS/V9lZL
+ubhzEFnTIZd+50xx+7LSYK05qAvqFyFWhfFQDlnrzuBZ6brJFe+GnY+EgPbk6ZGQ
+3BebYhtF8GaV0nxvwuo77x/Py9auJ/GpsMiu/X1+mvoiBOv/2X/qkSsisRcOj/KK
+NFtY2PwByVS5uCbMiogziUwthDyC3+6WVwW6LLv3xLfHTjuCvjHIInNzktHCgKQ5
+ORAzI4JMPJ+GslWYHb4phowim57iaztXOoJwTdwJx4nLCgdNbOhdjsnvzqvHu7Ur
+TkXWStAmzOVyyghqpZXjFaH3pO3JLF+l+/+sKAIuvtd7u+Nxe5AW0wdeRlN8NwdC
+jNPElpzVmbUq4JUagEiuTDkHzsxHpFKVK7q4+63SM1N95R1NbdWhscdCb+ZAJzVc
+oyi3B43njTOQ5yOf+1CceWxG1bQVs5ZufpsMljq4Ui0/1lvh+wjChP4kqKOJ2qxq
+4RgqsahDYVvTH9w7jXbyLeiNdd8XM2w9U/t7y0Ff/9yi0GE44Za4rF2LN9d11TPA
+mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d
+emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
+-----END CERTIFICATE-----
+)EOF";
+
+// HTTPS certificate validation needs a correct clock.
+void syncClockForTLS() {
+  configTime(0, 0, "pool.ntp.org", "time.google.com");
+  for (int i = 0; i < 30 && time(nullptr) < 1700000000; i++) {
+    delay(500);
+  }
+  Serial.println(time(nullptr) >= 1700000000 ? "[TLS] Clock ready" : "[TLS] Clock not synchronized");
+}
+
+// ===== ขาเซนเซอร์อัลตราโซนิก 4 ตัว =====
+const int trigPin1 = 5;
+const int echoPin1 = 18;
+
+const int trigPin2 = 4;
+const int echoPin2 = 17;
+
+const int trigPin3 = 19;
+const int echoPin3 = 16;
+
+const int trigPin4 = 32;
+const int echoPin4 = 35;
+
+// ===== ขาเซนเซอร์ IR 4 ตัว (E18-D80NK) =====
+const int irPin5 = 33;
+const int irPin6 = 14;
+const int irPin7 = 27;
+const int irPin8 = 26;
+
+// ===== ขาบัซเซอร์ =====
+const int buzzerPin = 25;
+const int resolution = 8;
+
+#define ALARM_TONE  1000
+const float thresholdCm = 15.0;
+const int maxVolume = 150;
+
+// ===== ชื่อถังแต่ละใบ เรียงตามลำดับเดียวกับเซนเซอร์อัลตราโซนิก 1-4 =====
+const char* binNames[4] = {"ทั่วไป", "กระดาษ", "กระป๋อง", "พลาสติก"};
+
+// ===== ตัวแปรเก็บค่าล่าสุด ให้เว็บดึงไปแสดง =====
+float dist1 = -1, dist2 = -1, dist3 = -1, dist4 = -1;
+bool ir5Detected = false, ir6Detected = false, ir7Detected = false, ir8Detected = false;
+
+// ===== ตัวนับแยกแต่ละ IR (ไม่ยุ่งกับบัซเซอร์) =====
+unsigned long ir5Count = 0;
+unsigned long ir6Count = 0;
+unsigned long ir7Count = 0;
+unsigned long ir8Count = 0;
+
+// ===== เพิ่มเฉพาะ: ตัวนับตลอดกาล (ไม่รีเซ็ต) สำหรับหน้า Trends =====
+unsigned long life_ir5 = 0;
+unsigned long life_ir6 = 0;
+unsigned long life_ir7 = 0;
+unsigned long life_ir8 = 0;
+
+// ===== คิวสำหรับส่งชื่อถังไปให้ Task Telegram (ทำงานคนละ Core) =====
+QueueHandle_t telegramQueue;
+
+float readDistanceCm(int trigPin, int echoPin) {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  long duration = pulseIn(echoPin, HIGH, 30000);
+  if (duration == 0) return -1;
+  return duration * 0.0343 / 2;
+}
+
+void softBeep() {
+  ledcWriteTone(buzzerPin, ALARM_TONE);
+  for (int duty = 0; duty <= maxVolume; duty += 5) {
+    ledcWrite(buzzerPin, duty);
+    delayMicroseconds(500);
+  }
+}
+
+void softStop() {
+  for (int duty = maxVolume; duty >= 0; duty -= 5) {
+    ledcWrite(buzzerPin, duty);
+    delayMicroseconds(500);
+  }
+  ledcWriteTone(buzzerPin, 0);
+}
+
+// ===== เพิ่มเฉพาะ: เข้ารหัสข้อมูลสำหรับ POST =====
+String telegramUrlEncode(const String &value) {
+  String encoded = "";
+  const char *hex = "0123456789ABCDEF";
+
+  for (size_t i = 0; i < value.length(); i++) {
+    uint8_t c = (uint8_t)value.charAt(i);
+
+    if ((c >= 'a' && c <= 'z') ||
+        (c >= 'A' && c <= 'Z') ||
+        (c >= '0' && c <= '9') ||
+        c == '-' || c == '_' || c == '.' || c == '~') {
+      encoded += (char)c;
+    } else {
+      encoded += '%';
+      encoded += hex[(c >> 4) & 0x0F];
+      encoded += hex[c & 0x0F];
+    }
+  }
+  return encoded;
+}
+
+// ===== เพิ่มเฉพาะ: บันทึกประวัติหลังจาก Telegram เดิมส่งเสร็จ =====
+void saveTelegramHistory(const char* combinedBinNames, int binCount) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[TelegramHistory] WiFi ไม่เชื่อมต่อ");
+    return;
+  }
+
+  if (time(nullptr) < 1700000000) {
+    syncClockForTLS();
+    if (time(nullptr) < 1700000000) {
+      Serial.println("[TelegramHistory] TLS clock unavailable");
+      return;
+    }
+  }
+  WiFiClientSecure logClient;
+  logClient.setCACert(ISRG_ROOT_X1); // validate server certificate, do not use setInsecure()
+  HTTPClient http;
+
+  if (!http.begin(logClient, telegramLogUrl)) {
+    Serial.println("[TelegramHistory] เปิด telegram_log.php ไม่สำเร็จ");
+    return;
+  }
+
+  String logMessage;
+  if (binCount > 1) {
+    logMessage = "ถังต่อไปนี้ใกล้เต็มพร้อมกัน: " + String(combinedBinNames) + " กรุณาไปเก็บขยะ";
+  } else {
+    logMessage = "ถัง " + String(combinedBinNames) + " ใกล้เต็มแล้ว! กรุณาไปเก็บขยะ";
+  }
+
+  http.setTimeout(5000);
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+  String postData =
+      "api_key=" + telegramUrlEncode(String(telegramLogApiKey)) +
+      "&bin_name=" + telegramUrlEncode(String(combinedBinNames)) +
+      "&message=" + telegramUrlEncode(logMessage) +
+      "&status=" + telegramUrlEncode("ส่งสำเร็จ");
+
+  Serial.println("[TelegramHistory] กำลังบันทึกประวัติ...");
+
+  int httpCode = http.POST(postData);
+
+  if (httpCode > 0) {
+    String response = http.getString();
+    Serial.printf("[TelegramHistory] HTTP %d: %s\n", httpCode, response.c_str());
+  } else {
+    Serial.printf("[TelegramHistory] POST ไม่สำเร็จ: %s\n", http.errorToString(httpCode).c_str());
+  }
+
+  http.end();
+}
+
+// ===== ฟังก์ชันส่งข้อความจริง (ถูกเรียกจาก Task บน Core 0 เท่านั้น) =====
+// รองรับชื่อถังหลายชื่อรวมกันในข้อความเดียว (คั่นด้วย comma) และจำนวนถังที่เต็มพร้อมกัน
+void sendTelegramAlertBlocking(const char* combinedBinNames, int binCount) {
+  WiFiClientSecure telegramClient;
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi ไม่เชื่อมต่อ ข้ามการส่ง Telegram");
+    return;
+  }
+
+  telegramClient.setInsecure();
+  telegramClient.setTimeout(5000);
+
+  Serial.printf("[TelegramTask] กำลังส่งแจ้งเตือน %d ถัง: %s\n", binCount, combinedBinNames);
+
+  // ===== เพิ่มเฉพาะ: บันทึกประวัติทันทีเมื่อระบบเรียกการแจ้งเตือน =====
+  // วางก่อนการเชื่อมต่อ Telegram เพื่อไม่ให้การรอ HTTPS ของ Telegram ขัดขวางการบันทึกประวัติ
+  Serial.println("[TelegramHistory] เริ่มบันทึกประวัติ...");
+  saveTelegramHistory(combinedBinNames, binCount);
+
+  if (!telegramClient.connect("api.telegram.org", 443, 5000)) {
+    Serial.println("[TelegramTask] เชื่อมต่อไม่ได้ (timeout) ข้ามรอบนี้ไป");
+    return;
+  }
+
+  String message;
+  if (binCount > 1) {
+    message = "ถังต่อไปนี้ใกล้เต็มพร้อมกัน: " + String(combinedBinNames) + " กรุณาไปเก็บขยะ";
+  } else {
+    message = "ถัง " + String(combinedBinNames) + " ใกล้เต็มแล้ว! กรุณาไปเก็บขยะ";
+  }
+  message.replace(" ", "%20");
+
+  String url = "/bot" + String(botToken) + "/sendMessage?chat_id=" + String(chatId) + "&text=" + message;
+
+  telegramClient.print(String("GET ") + url + " HTTP/1.1\r\n" +
+               "Host: api.telegram.org\r\n" +
+               "Connection: close\r\n\r\n");
+
+  unsigned long timeout = millis();
+  while (telegramClient.connected() && millis() - timeout < 5000) {
+    if (telegramClient.available()) {
+      telegramClient.read();       // อ่านทิ้งเพื่อเคลียร์บัฟเฟอร์
+      timeout = millis();
+    }
+    delay(10);                     // สำคัญ: คืน CPU ให้ระบบ
+  }
+  telegramClient.stop();
+
+  // ===== Telegram เดิมจบตรงนี้ ไม่มีการเปลี่ยนวิธีส่ง =====
+  Serial.printf("[TelegramTask] ส่งแจ้งเตือนสำเร็จ: %s\n", combinedBinNames);
+}
+
+// ===== Task ที่ทำงานอยู่บน Core 0 ตลอดเวลา รอรับคิวจากลูปหลัก =====
+// รวบรวมรายการที่เข้าคิวใกล้ๆ กัน (ภายใน 1.5 วินาที) แล้วส่งเป็นข้อความเดียว
+void telegramTask(void *parameter) {
+  char binName[32];
+  for (;;) {
+    // รอรับชื่อถังตัวแรกแบบไม่จำกัดเวลา (task ว่างก็แค่รอเฉยๆ ไม่กินซีพียู)
+    if (xQueueReceive(telegramQueue, &binName, portMAX_DELAY) == pdTRUE) {
+      String combined = String(binName);
+      int count = 1;
+
+      // เปิดหน้าต่างรอ 1.5 วินาที เก็บรายการอื่นที่เข้ามาใกล้ๆ กันเข้าด้วยกัน
+      unsigned long windowStart = millis();
+      char nextBin[32];
+      while (millis() - windowStart < 1500) {
+        if (xQueueReceive(telegramQueue, &nextBin, pdMS_TO_TICKS(200)) == pdTRUE) {
+          combined += ", " + String(nextBin);
+          count++;
+        }
+      }
+
+      sendTelegramAlertBlocking(combined.c_str(), count);
+    }
+  }
+}
+
+// ===== เรียกจากลูปหลัก: แค่ยัดชื่อถังเข้าคิว ไม่บล็อกเลยแม้แต่นิดเดียว =====
+void queueTelegramAlert(const char* binName) {
+  char buffer[32];
+  strncpy(buffer, binName, sizeof(buffer));
+  // ส่งเข้าคิวแบบไม่รอ (timeout = 0) ถ้าคิวเต็มก็แค่ข้ามไป ไม่ค้าง
+  xQueueSend(telegramQueue, &buffer, 0);
+}
+
+// ===== handler สำหรับ endpoint /data =====
+void handleData() {
+  String json = "{";
+  json += "\"d1\":" + String(dist1) + ",";
+  json += "\"d2\":" + String(dist2) + ",";
+  json += "\"d3\":" + String(dist3) + ",";
+  json += "\"d4\":" + String(dist4) + ",";
+  json += "\"ir5\":" + String(ir5Detected ? 1 : 0) + ",";
+  json += "\"ir6\":" + String(ir6Detected ? 1 : 0) + ",";
+  json += "\"ir7\":" + String(ir7Detected ? 1 : 0) + ",";
+  json += "\"ir8\":" + String(ir8Detected ? 1 : 0) + ",";
+  json += "\"ir5Count\":" + String(ir5Count) + ",";
+  json += "\"ir6Count\":" + String(ir6Count) + ",";
+  json += "\"ir7Count\":" + String(ir7Count) + ",";
+  json += "\"ir8Count\":" + String(ir8Count) + ",";
+  // ===== เพิ่มบรรทัดส่งค่าตัวนับตลอดกาล =====
+  json += "\"life_ir5\":" + String(life_ir5) + ",";
+  json += "\"life_ir6\":" + String(life_ir6) + ",";
+  json += "\"life_ir7\":" + String(life_ir7) + ",";
+  json += "\"life_ir8\":" + String(life_ir8);
+  json += "}";
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(200, "application/json", json);
+}
+
+// ===== handler สำหรับรีเซ็ตตัวนับทั้งหมด (เรียกผ่าน /reset) =====
+void handleReset() {
+  ir5Count = 0;
+  ir6Count = 0;
+  ir7Count = 0;
+  ir8Count = 0;
+  preferences.putULong("ir5Count", 0);
+  preferences.putULong("ir6Count", 0);
+  preferences.putULong("ir7Count", 0);
+  preferences.putULong("ir8Count", 0);
+  // ตรงนี้เราไม่ได้เคลียร์ตัวแปร life_ir เพื่อให้มันนับต่อไปเรื่อยๆ
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(200, "text/plain", "reset ok");
+}
+
+void setup() {
+  Serial.begin(115200);
+
+    esp_reset_reason_t reason = esp_reset_reason();
+  Serial.printf("สาเหตุรีสตาร์ท: %d\n", (int)reason);
+
+  // ===== เปิด namespace เก็บข้อมูลถาวร แล้วโหลดตัวนับเดิมกลับมา (ถ้ามี) =====
+  preferences.begin("wastebank", false);
+  ir5Count = preferences.getULong("ir5Count", 0);
+  ir6Count = preferences.getULong("ir6Count", 0);
+  ir7Count = preferences.getULong("ir7Count", 0);
+  ir8Count = preferences.getULong("ir8Count", 0);
+  
+  // ===== โหลดตัวนับตลอดกาล =====
+  life_ir5 = preferences.getULong("life_ir5", 0);
+  life_ir6 = preferences.getULong("life_ir6", 0);
+  life_ir7 = preferences.getULong("life_ir7", 0);
+  life_ir8 = preferences.getULong("life_ir8", 0);
+  Serial.println("โหลดตัวนับเดิมจาก Flash สำเร็จ");
+
+  pinMode(trigPin1, OUTPUT); pinMode(echoPin1, INPUT);
+  pinMode(trigPin2, OUTPUT); pinMode(echoPin2, INPUT);
+  pinMode(trigPin3, OUTPUT); pinMode(echoPin3, INPUT);
+  pinMode(trigPin4, OUTPUT); pinMode(echoPin4, INPUT);
+
+  pinMode(irPin5, INPUT_PULLUP);
+  pinMode(irPin6, INPUT_PULLUP);
+  pinMode(irPin7, INPUT_PULLUP);
+  pinMode(irPin8, INPUT_PULLUP);
+
+  ledcAttach(buzzerPin, ALARM_TONE, resolution);
+
+  WiFi.begin(ssid, password);
+  Serial.print("กำลังเชื่อมต่อ WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println();
+  Serial.print("เชื่อมต่อสำเร็จ! IP: ");
+  Serial.println(WiFi.localIP());
+  syncClockForTLS();
+
+  server.on("/data", handleData);
+  server.on("/reset", handleReset);
+  server.begin();
+
+  // ===== สร้างคิวและ Task สำหรับส่ง Telegram บน Core 0 =====
+  telegramQueue = xQueueCreate(4, sizeof(char[32])); // เก็บได้สูงสุด 4 รายการรอคิว
+  xTaskCreatePinnedToCore(
+    telegramTask,     // ฟังก์ชันที่จะรัน
+    "TelegramTask",   // ชื่อ task (ไว้ debug)
+    8192,             // ขนาด stack (bytes) - ให้เผื่อไว้เยอะเพราะ TLS ใช้เยอะ
+    NULL,             // พารามิเตอร์ที่ส่งเข้า task
+    1,                // ความสำคัญ (priority)
+    NULL,             // handle (ไม่ใช้)
+    0                 // Core 0 (loop() หลักอยู่ Core 1 โดย default)
+  );
+}
+
+bool wasTooClose = false;
+
+// ===== ระบบบัซเซอร์แบบดัง 3 วิ / เงียบ 3 นาที วนซ้ำ =====
+const unsigned long BEEP_ON_MS  = 3000;  // ดัง 3 วินาที
+const unsigned long BEEP_OFF_MS = 180000;  // เงียบ 3 นาที
+bool buzzerOn = false;
+unsigned long buzzerLastChange = 0;
+
+bool wasIr5Detected = false, wasIr6Detected = false, wasIr7Detected = false, wasIr8Detected = false;
+
+bool alertSent1 = false, alertSent2 = false, alertSent3 = false, alertSent4 = false;
+
+void loop() {
+  server.handleClient();
+
+  dist1 = readDistanceCm(trigPin1, echoPin1);
+  delay(20);
+  dist2 = readDistanceCm(trigPin2, echoPin2);
+  delay(20);
+  dist3 = readDistanceCm(trigPin3, echoPin3);
+  delay(20);
+  dist4 = readDistanceCm(trigPin4, echoPin4);
+  delay(20);
+
+  ir5Detected = (digitalRead(irPin5) == LOW);
+  ir6Detected = (digitalRead(irPin6) == LOW);
+  ir7Detected = (digitalRead(irPin7) == LOW);
+  ir8Detected = (digitalRead(irPin8) == LOW);
+
+  Serial.print("อัลตราโซนิก1:"); Serial.print(dist1);
+  Serial.print(" อัลตราโซนิก2:"); Serial.print(dist2);
+  Serial.print(" อัลตราโซนิก3:"); Serial.print(dist3);
+  Serial.print(" อัลตราโซนิก4:"); Serial.print(dist4);
+  Serial.print(" ทั่วไป:"); Serial.print(ir5Count);
+  Serial.print(" กระดาษ:"); Serial.print(ir6Count);
+  Serial.print(" กระป๋อง:"); Serial.print(ir7Count);
+  Serial.print(" พลาสติก:"); Serial.println(ir8Count);
+
+  bool close1 = (dist1 > 0 && dist1 <= thresholdCm);
+  bool close2 = (dist2 > 0 && dist2 <= thresholdCm);
+  bool close3 = (dist3 > 0 && dist3 <= thresholdCm);
+  bool close4 = (dist4 > 0 && dist4 <= thresholdCm);
+  bool tooClose = close1 || close2 || close3 || close4;
+
+  // ===== บัซเซอร์ทำงานทันที ไม่รอเน็ตเลย =====
+   // ===== บัซเซอร์: ดัง 3 วิ -> เงียบ 3 นาที -> วนไปเรื่อยๆ ตราบที่ยังมีถังเต็ม =====
+  unsigned long now = millis();
+
+  if (tooClose) {
+    if (!wasTooClose) {
+      // เพิ่งเต็ม -> เริ่มดังทันที
+      softBeep();
+      buzzerOn = true;
+      buzzerLastChange = now;
+    } else if (buzzerOn && now - buzzerLastChange >= BEEP_ON_MS) {
+      // ดังครบ 3 วิ -> ดับ
+      softStop();
+      buzzerOn = false;
+      buzzerLastChange = now;
+    } else if (!buzzerOn && now - buzzerLastChange >= BEEP_OFF_MS) {
+      // เงียบครบ 3 นาที -> ดังอีกรอบ
+      softBeep();
+      buzzerOn = true;
+      buzzerLastChange = now;
+    }
+  } else if (wasTooClose) {
+    // ถังไม่เต็มแล้ว -> หยุดทันที
+    if (buzzerOn) softStop();
+    buzzerOn = false;
+  }
+  wasTooClose = tooClose;
+
+  // ===== แค่ "ยัดคิว" ไม่ได้ส่งจริงตรงนี้ ไม่บล็อก loop() แน่นอน =====
+  // และรีเซ็ตตัวนับ IR ของถังนั้นๆ ทันทีที่เพิ่งเปลี่ยนเป็น "เต็ม" (ตัดรอบนับใหม่)
+  if (close1 && !alertSent1) { queueTelegramAlert(binNames[0]); alertSent1 = true; ir5Count = 0; preferences.putULong("ir5Count", 0); }
+  if (close2 && !alertSent2) { queueTelegramAlert(binNames[1]); alertSent2 = true; ir6Count = 0; preferences.putULong("ir6Count", 0); }
+  if (close3 && !alertSent3) { queueTelegramAlert(binNames[2]); alertSent3 = true; ir7Count = 0; preferences.putULong("ir7Count", 0); }
+  if (close4 && !alertSent4) { queueTelegramAlert(binNames[3]); alertSent4 = true; ir8Count = 0; preferences.putULong("ir8Count", 0); }
+
+  if (!close1) alertSent1 = false;
+  if (!close2) alertSent2 = false;
+  if (!close3) alertSent3 = false;
+  if (!close4) alertSent4 = false;
+
+  // ===== เปลี่ยนการอัปเดตตัวนับ ให้เพิ่มตัวนับตลอดกาลด้วย =====
+  if (ir5Detected && !wasIr5Detected) { 
+    ir5Count++; preferences.putULong("ir5Count", ir5Count); 
+    life_ir5++; preferences.putULong("life_ir5", life_ir5); 
+  }
+  wasIr5Detected = ir5Detected;
+
+  if (ir6Detected && !wasIr6Detected) { 
+    ir6Count++; preferences.putULong("ir6Count", ir6Count); 
+    life_ir6++; preferences.putULong("life_ir6", life_ir6); 
+  }
+  wasIr6Detected = ir6Detected;
+
+  if (ir7Detected && !wasIr7Detected) { 
+    ir7Count++; preferences.putULong("ir7Count", ir7Count); 
+    life_ir7++; preferences.putULong("life_ir7", life_ir7); 
+  }
+  wasIr7Detected = ir7Detected;
+
+  if (ir8Detected && !wasIr8Detected) { 
+    ir8Count++; preferences.putULong("ir8Count", ir8Count); 
+    life_ir8++; preferences.putULong("life_ir8", life_ir8); 
+  }
+  wasIr8Detected = ir8Detected;
+
+  delay(100);
+}
